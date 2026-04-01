@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+
+enum Role {
+  super_admin
+  admin
+  staff
+}
+
+enum PurchaseStatus {
+  pending
+  paid
+  refunded
+  void
+}
+
+model User {
+  id              Int      @id @default(autoincrement())
+  name            String
+  email           String   @unique
+  passwordHash    String
+  role            Role
+  isActive        Boolean   @default(true)
+  resetToken      String?
+  resetTokenExp   DateTime?
+  lastLogin       DateTime?  
+  createdAt       DateTime @default(now())
+  
+  collections     Purchase[] @relation("CollectedBy")
+}
+
+model Manual {
+  id        Int       @id @default(autoincrement())
+  title     String
+  courseCode String?
+  price     Float
+  imageURL  String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  purchases Purchase[]
+
+  @@unique([title, courseCode])
+}
+
+model Purchase {
+  id               Int            @id @default(autoincrement())
+  
+  // Relations
+  manual           Manual         @relation(fields: [manualId], references: [id])
+  manualId         Int
+  
+  // Student Details
+  fullName         String
+  matricNo         String
+  department       String
+  level            Int
+  email            String
+  amount           Float          @default(0)
+  // Status & Payment
+  status           PurchaseStatus @default(pending)
+  transactionRef   String?        @unique
+  paymentProvider  String?
+  qrToken          String?        @unique
+
+  // Collection Data
+  collected        Boolean        @default(false)
+  collectedAt      DateTime?
+  collectedBy      User?          @relation("CollectedBy", fields: [collectedById], references: [id])
+  collectedById    Int?
+  issuedBy         String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
+  @@unique([matricNo, manualId])
+}
