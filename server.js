@@ -12,7 +12,7 @@ const server = app.listen(PORT, () => {
 
   // 2. Add the Ping logic here
   // Note: Check your Render dashboard after deploying to see if your URL is exactly this!
-  const RENDER_URL = "https://manual-app-backend.onrender.com/health"; 
+  const RENDER_URL = "https://manual-distribution-backend.onrender.com/health"; 
 
   setInterval(() => {
     axios.get(RENDER_URL)
