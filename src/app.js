@@ -8,6 +8,8 @@ const purchaseRoutes = require('./routes/purchaseRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const app = express();
 
+app.set('trust proxy', 1);
+
 // --- CORS CONFIGURATION ---
 const allowedOrigins = [
   'http://localhost:5173', // Your local React/Vite dev server

@@ -6,7 +6,7 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'manuals', // This creates a folder named 'manuals' in your Cloudinary dashboard
-    allowed_formats: ['jpg', 'png', 'jpeg'],
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'avif'], // Allowed file types
     // Optional: add transformation like resizing if you want
     transformation: [{ width: 500, height: 700, crop: 'limit' }] 
   },
