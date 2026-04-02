@@ -8,6 +8,26 @@ const purchaseRoutes = require('./routes/purchaseRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const app = express();
 
+// --- CORS CONFIGURATION ---
+const allowedOrigins = [
+  'http://localhost:5173', // Your local React/Vite dev server
+  'https://manual-distribution-frontend.vercel.app' // Your live Vercel URL
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true // Required if you are sending tokens/cookies
+}));
+
 // Apply rate limiting to all requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -16,7 +36,6 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
-app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/api/purchases', purchaseRoutes);
