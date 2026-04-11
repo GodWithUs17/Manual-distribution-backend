@@ -179,9 +179,134 @@ const getReceipt = async (req, res) => {
 
  //Function to verify payment
 
- const verifyPayment = async (req, res) => {
-  // 1. Destructure both references from the frontend payload
-  const { reference, internalRef } = req.body;
+//  const verifyPayment = async (req, res) => {
+//   // 1. Destructure both references from the frontend payload
+//   const { reference, internalRef } = req.body;
+
+//   if (!reference) {
+//     return res.status(400).json({ error: 'Transaction reference is required' });
+//   }
+
+//   try {
+//     // 2. OFFICIAL PAYSTACK CHECK
+//     // We verify the actual transaction using the reference Paystack generated
+//     const paystackRes = await axios.get(
+//       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+//         },
+//       }
+//     );
+
+//     if (paystackRes.data.data.status !== 'success') {
+//       return res.status(400).json({ error: 'Payment has not been completed on Paystack' });
+//     }
+
+//     // 3. DATABASE CHECK (The "Sync" Logic)
+//     // We search for the record using either our internalRef OR the Paystack reference
+//     const purchase = await prisma.purchase.findFirst({
+//       where: {
+//         OR: [
+//           { transactionRef: internalRef }, // Find it by our original ID
+//           { transactionRef: reference }    // Or find it by Paystack's ID
+//         ]
+//       },
+//       include: { manual: true }
+//     });
+
+//     if (purchase.status === 'paid') {
+//         return res.status(200).json({ 
+//             message: 'Payment already verified',
+//             purchase: purchase });
+//        }
+
+//     if (!purchase) {
+//       console.error(`Database Search Failed. Tried: ${internalRef} and ${reference}`);
+//       return res.status(404).json({ error: 'Purchase record not found in database' });
+//     }
+
+//     // 4. IF ALREADY PAID
+//     if (purchase.status === 'paid') {
+//       return res.status(200).json({ 
+//         message: 'Payment already verified',
+//         purchase: purchase 
+//       });
+//     }
+
+//     // 5. UPDATE DB & SYNC REFERENCE
+//     const qrToken = uuidv4();
+
+//     const updatedPurchase = await prisma.purchase.update({
+//       where: { id: purchase.id },
+//       data: {
+//         status: 'paid',
+//         qrToken: qrToken,
+//         transactionRef: reference // We overwrite our old ID with Paystack's official ID
+//       },
+//       include: { manual: true }
+//     });
+
+
+//     // --- NEW STEP 6 & 7: PROFESSIONAL PDF & EMAIL ---
+//     try {
+//       // Create the link for the QR code
+//       const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${qrToken}`;
+      
+//       // We generate a Buffer (raw data) for the PDF and Email attachments
+//       const qrBuffer = await QRCode.toBuffer(qrUrl);
+
+//       // Generate the official PDF using the function we built
+//       const pdfBuffer = await generateReceiptPDF(updatedPurchase, qrBuffer);
+
+//       // Send the Email
+//       await transporter.sendMail({
+//         to: updatedPurchase.email,
+//         subject: `LAUTECH Receipt: ${updatedPurchase.manual.title}`,
+//         html: `
+//           <div style="font-family: sans-serif; max-width: 500px; border: 1px solid #eee; padding: 20px;">
+//             <h2 style="color: #003366;">Payment Successful</h2>
+//             <p>Hello <b>${updatedPurchase.fullName}</b>,</p>
+//             <p>Your payment for <b>${updatedPurchase.manual.title}</b> has been confirmed.</p>
+//             <p>Please find your <b>Official Digital Receipt</b> attached as a PDF to this email.</p>
+//             <p>Download it and present the QR code at the collection point to get your manual.</p>
+//             <hr />
+//             <p style="font-size: 11px; color: #888;">Transaction Ref: ${reference}</p>
+//           </div>
+//         `,
+//         attachments: [
+//           {
+//             filename: `LAUTECH_Receipt_${updatedPurchase.id}.pdf`,
+//             content: pdfBuffer,
+//             contentType: 'application/pdf'
+//           }
+//         ]
+//       });
+
+//       console.log("Professional PDF Receipt sent successfully.");
+
+//     } catch (pdfMailError) {
+//       // We log the error but don't stop the process because the payment is already saved in DB
+//       console.error("PDF/Email Error:", pdfMailError.message);
+//     }
+
+//     // 8. FINAL RESPONSE
+//     return res.status(200).json({
+//       message: 'Payment verified and receipt sent successfully',
+//       purchase: updatedPurchase 
+//     });
+
+//   } catch (error) {
+//     console.error('verifyPayment error:', error.response?.data || error.message);
+//     return res.status(500).json({ error: 'Internal server error during verification' });
+//   }
+// };
+
+
+// Function to verify payment
+const verifyPayment = async (req, res) => {
+  // 1. Get the reference from the frontend (passed from the URL)
+  const { reference } = req.body;
 
   if (!reference) {
     return res.status(400).json({ error: 'Transaction reference is required' });
@@ -189,7 +314,6 @@ const getReceipt = async (req, res) => {
 
   try {
     // 2. OFFICIAL PAYSTACK CHECK
-    // We verify the actual transaction using the reference Paystack generated
     const paystackRes = await axios.get(
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
@@ -203,30 +327,20 @@ const getReceipt = async (req, res) => {
       return res.status(400).json({ error: 'Payment has not been completed on Paystack' });
     }
 
-    // 3. DATABASE CHECK (The "Sync" Logic)
-    // We search for the record using either our internalRef OR the Paystack reference
+    // 3. DATABASE CHECK
+    // We search for the record using the transactionRef we created during initialization
     const purchase = await prisma.purchase.findFirst({
-      where: {
-        OR: [
-          { transactionRef: internalRef }, // Find it by our original ID
-          { transactionRef: reference }    // Or find it by Paystack's ID
-        ]
-      },
+      where: { transactionRef: reference },
       include: { manual: true }
     });
 
-    if (purchase.status === 'paid') {
-        return res.status(200).json({ 
-            message: 'Payment already verified',
-            purchase: purchase });
-       }
-
     if (!purchase) {
-      console.error(`Database Search Failed. Tried: ${internalRef} and ${reference}`);
+      console.error(`Database Search Failed for reference: ${reference}`);
       return res.status(404).json({ error: 'Purchase record not found in database' });
     }
 
     // 4. IF ALREADY PAID
+    // Return early if already paid to avoid re-sending emails on page refresh
     if (purchase.status === 'paid') {
       return res.status(200).json({ 
         message: 'Payment already verified',
@@ -234,7 +348,7 @@ const getReceipt = async (req, res) => {
       });
     }
 
-    // 5. UPDATE DB & SYNC REFERENCE
+    // 5. UPDATE DB
     const qrToken = uuidv4();
 
     const updatedPurchase = await prisma.purchase.update({
@@ -242,21 +356,17 @@ const getReceipt = async (req, res) => {
       data: {
         status: 'paid',
         qrToken: qrToken,
-        transactionRef: reference // We overwrite our old ID with Paystack's official ID
       },
       include: { manual: true }
     });
 
-
-    // --- NEW STEP 6 & 7: PROFESSIONAL PDF & EMAIL ---
+    // --- STEP 6 & 7: PROFESSIONAL PDF & EMAIL (Your Original Logic) ---
     try {
       // Create the link for the QR code
       const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${qrToken}`;
-      
-      // We generate a Buffer (raw data) for the PDF and Email attachments
       const qrBuffer = await QRCode.toBuffer(qrUrl);
 
-      // Generate the official PDF using the function we built
+      // Generate the official PDF
       const pdfBuffer = await generateReceiptPDF(updatedPurchase, qrBuffer);
 
       // Send the Email
@@ -284,9 +394,7 @@ const getReceipt = async (req, res) => {
       });
 
       console.log("Professional PDF Receipt sent successfully.");
-
     } catch (pdfMailError) {
-      // We log the error but don't stop the process because the payment is already saved in DB
       console.error("PDF/Email Error:", pdfMailError.message);
     }
 
@@ -301,8 +409,6 @@ const getReceipt = async (req, res) => {
     return res.status(500).json({ error: 'Internal server error during verification' });
   }
 };
-
-
 
 
 // // Function to create a new purchase
