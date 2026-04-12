@@ -457,7 +457,7 @@ const initializePurchase = async (req, res) => {
 
         // 4. DATABASE TRANSACTION (DELETE OLD PENDING & CREATE NEW)
         // This ensures that if the user had a network error before, we clear it and start fresh.
-        const reference = crypto.randomBytes(16).toString('hex');
+        const reference = `MNL-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
 
         const newPurchase = await prisma.$transaction(async (tx) => {
             // Remove any previous 'pending' attempts for this specific manual/student
@@ -485,11 +485,31 @@ const initializePurchase = async (req, res) => {
             });
         });
 
+        // 4. Call Paystack Initialize (Direct Redirect Method)
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
+    const paystackRes = await axios.post(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        email: email.trim(),
+        amount: manual.price * 100, 
+        reference: reference, // Tell Paystack to use our REF
+        callback_url: `${frontendUrl}/verify-payment`, 
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
         // 5. OPTIONAL: NON-BLOCKING MAILER
         // We do NOT 'await' this so that the student gets the Paystack window immediately.
         try {
             // Replace with your actual mail function if you have one
-            // sendInitEmail(email, fullName, manual.title, reference); 
+            // sendInitEmail(email, fullName, manual.title, reference);   
             console.log(`✅ Success: Initialized purchase for ${matricNo}`);
         } catch (mailErr) {
             console.error("Mailer Warning (Non-Fatal):", mailErr.message);
@@ -497,7 +517,8 @@ const initializePurchase = async (req, res) => {
 
         // 6. RETURN SUCCESS TO FRONTEND
         return res.status(201).json({ 
-            message: 'Purchase initialized successfully', 
+            message: 'Purchase initialized successfully',
+            authorization_url: paystackRes.data.data.authorization_url, 
             purchase: newPurchase 
         });
 
