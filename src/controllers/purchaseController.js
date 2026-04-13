@@ -265,50 +265,6 @@ const verifyPayment = async (req, res) => {
   }
 };
 
-// const handlePaystackWebhook = async (req, res) => {
-//   try {
-//     const signature = req.headers['x-paystack-signature'];
-//     if (!signature) {
-//       return res.status(400).send('Missing Paystack signature');
-//     }
-
-//     const rawBody = Buffer.isBuffer(req.body)
-//       ? req.body
-//       : Buffer.from(JSON.stringify(req.body));
-
-//     const hash = crypto
-//       .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
-//       .update(rawBody)
-//       .digest('hex');
-
-//     if (hash !== signature) {
-//       return res.status(401).send('Invalid signature');
-//     }
-
-//     const payload = Buffer.isBuffer(req.body)
-//       ? JSON.parse(rawBody.toString('utf8'))
-//       : req.body;
-
-//     if (!payload || !payload.event) {
-//       return res.status(400).send('Invalid webhook payload');
-//     }
-
-//     if (payload.event !== 'charge.success' && payload.event !== 'transaction.success') {
-//       return res.status(200).send('Ignored event');
-//     }
-
-//     const reference = payload.data?.reference;
-//     if (!reference) {
-//       return res.status(400).send('Missing reference');
-//     }
-
-//     await processSuccessfulPayment(reference);
-//     return res.status(200).send('Webhook processed');
-//   } catch (error) {
-//     console.error('Paystack webhook error:', error);
-//     return res.status(500).send('Webhook processing failed');
-//   }
-// };
 
 const handlePaystackWebhook = async (req, res) => {
   try {
@@ -399,7 +355,8 @@ const initializePurchase = async (req, res) => {
 
         // 4. DATABASE TRANSACTION (DELETE OLD PENDING & CREATE NEW)
         // This ensures that if the user had a network error before, we clear it and start fresh.
-        const reference = `MNL-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+        const shortID = crypto.randomBytes(3).toString('hex').toUpperCase();
+        const reference = `T-${shortID}`;
 
         const newPurchase = await prisma.$transaction(async (tx) => {
             // Remove any previous 'pending' attempts for this specific manual/student
@@ -407,7 +364,7 @@ const initializePurchase = async (req, res) => {
                 where: {
                     manualId: idAsNumber,
                     matricNo: matricNo.trim(),
-                    status: 'pending'
+                    status: 'pending' 
                 }
             });
 
