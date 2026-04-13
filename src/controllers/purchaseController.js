@@ -177,12 +177,62 @@ const getReceipt = async (req, res) => {
   }
 };
 
- 
+// Shared helper for paid purchases
+const processSuccessfulPayment = async (reference) => {
+  const purchase = await prisma.purchase.findFirst({
+    where: { transactionRef: reference },
+    include: { manual: true }
+  });
 
+  if (!purchase) {
+    throw new Error(`Purchase not found for reference: ${reference}`);
+  }
 
-// Function to verify payment
+  if (purchase.status === 'paid') {
+    return purchase;
+  }
+
+  const qrToken = uuidv4();
+  const updatedPurchase = await prisma.purchase.update({
+    where: { id: purchase.id },
+    data: {
+      status: 'paid',
+      qrToken,
+    },
+    include: { manual: true }
+  });
+
+  const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${qrToken}`;
+  const qrBuffer = await QRCode.toBuffer(qrUrl);
+  const pdfBuffer = await generateReceiptPDF(updatedPurchase, qrBuffer);
+
+  await transporter.sendMail({
+    to: updatedPurchase.email,
+    subject: `LAUTECH Receipt: ${updatedPurchase.manual.title}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 500px; border: 1px solid #eee; padding: 20px;">
+        <h2 style="color: #003366;">Payment Successful</h2>
+        <p>Hello <b>${updatedPurchase.fullName}</b>,</p>
+        <p>Your payment for <b>${updatedPurchase.manual.title}</b> has been confirmed.</p>
+        <p>Please find your <b>Official Digital Receipt</b> attached as a PDF to this email.</p>
+        <p>Download it and present the QR code at the collection point to get your manual.</p>
+        <hr />
+        <p style="font-size: 11px; color: #888;">Transaction Ref: ${reference}</p>
+      </div>
+    `,
+    attachments: [
+      {
+        filename: `LAUTECH_Receipt_${updatedPurchase.id}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      }
+    ]
+  });
+
+  return updatedPurchase;
+};
+
 const verifyPayment = async (req, res) => {
-  // 1. Get the reference from the frontend (passed from the URL)
   const { reference } = req.body;
 
   if (!reference) {
@@ -190,7 +240,6 @@ const verifyPayment = async (req, res) => {
   }
 
   try {
-    // 2. OFFICIAL PAYSTACK CHECK
     const paystackRes = await axios.get(
       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
@@ -204,91 +253,64 @@ const verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Payment has not been completed on Paystack' });
     }
 
-    // 3. DATABASE CHECK
-    // We search for the record using the transactionRef we created during initialization
-    const purchase = await prisma.purchase.findFirst({
-      where: { transactionRef: reference },
-      include: { manual: true }
-    });
+    const updatedPurchase = await processSuccessfulPayment(reference);
 
-    if (!purchase) {
-      console.error(`Database Search Failed for reference: ${reference}`);
-      return res.status(404).json({ error: 'Purchase record not found in database' });
-    }
-
-    // 4. IF ALREADY PAID
-    // Return early if already paid to avoid re-sending emails on page refresh
-    if (purchase.status === 'paid') {
-      return res.status(200).json({ 
-        message: 'Payment already verified',
-        purchase: purchase 
-      });
-    }
-
-    // 5. UPDATE DB
-    const qrToken = uuidv4();
-
-    const updatedPurchase = await prisma.purchase.update({
-      where: { id: purchase.id },
-      data: {
-        status: 'paid',
-        qrToken: qrToken,
-      },
-      include: { manual: true }
-    });
-
-    // --- STEP 6 & 7: PROFESSIONAL PDF & EMAIL (Your Original Logic) ---
-    try {
-      // Create the link for the QR code
-      const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${qrToken}`;
-      const qrBuffer = await QRCode.toBuffer(qrUrl);
-
-      // Generate the official PDF
-      const pdfBuffer = await generateReceiptPDF(updatedPurchase, qrBuffer);
-
-      // Send the Email
-      await transporter.sendMail({
-        to: updatedPurchase.email,
-        subject: `LAUTECH Receipt: ${updatedPurchase.manual.title}`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 500px; border: 1px solid #eee; padding: 20px;">
-            <h2 style="color: #003366;">Payment Successful</h2>
-            <p>Hello <b>${updatedPurchase.fullName}</b>,</p>
-            <p>Your payment for <b>${updatedPurchase.manual.title}</b> has been confirmed.</p>
-            <p>Please find your <b>Official Digital Receipt</b> attached as a PDF to this email.</p>
-            <p>Download it and present the QR code at the collection point to get your manual.</p>
-            <hr />
-            <p style="font-size: 11px; color: #888;">Transaction Ref: ${reference}</p>
-          </div>
-        `,
-        attachments: [
-          {
-            filename: `LAUTECH_Receipt_${updatedPurchase.id}.pdf`,
-            content: pdfBuffer,
-            contentType: 'application/pdf'
-          }
-        ]
-      });
-
-      console.log("Professional PDF Receipt sent successfully.");
-    } catch (pdfMailError) {
-      console.error("PDF/Email Error:", pdfMailError.message);
-    }
-
-    // 8. FINAL RESPONSE
     return res.status(200).json({
       message: 'Payment verified and receipt sent successfully',
-      purchase: updatedPurchase 
+      purchase: updatedPurchase
     });
-
   } catch (error) {
     console.error('verifyPayment error:', error.response?.data || error.message);
     return res.status(500).json({ error: 'Internal server error during verification' });
   }
 };
 
+const handlePaystackWebhook = async (req, res) => {
+  try {
+    const signature = req.headers['x-paystack-signature'];
+    if (!signature) {
+      return res.status(400).send('Missing Paystack signature');
+    }
 
-// // Function to create a new purchase
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(JSON.stringify(req.body));
+
+    const hash = crypto
+      .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
+      .update(rawBody)
+      .digest('hex');
+
+    if (hash !== signature) {
+      return res.status(401).send('Invalid signature');
+    }
+
+    const payload = Buffer.isBuffer(req.body)
+      ? JSON.parse(rawBody.toString('utf8'))
+      : req.body;
+
+    if (!payload || !payload.event) {
+      return res.status(400).send('Invalid webhook payload');
+    }
+
+    if (payload.event !== 'charge.success' && payload.event !== 'transaction.success') {
+      return res.status(200).send('Ignored event');
+    }
+
+    const reference = payload.data?.reference;
+    if (!reference) {
+      return res.status(400).send('Missing reference');
+    }
+
+    await processSuccessfulPayment(reference);
+    return res.status(200).send('Webhook processed');
+  } catch (error) {
+    console.error('Paystack webhook error:', error);
+    return res.status(500).send('Webhook processing failed');
+  }
+};
+
+// Function to create a new purchase
 
 const initializePurchase = async (req, res) => {
     try {
@@ -547,4 +569,6 @@ module.exports = { initializePurchase,
     markCollected,
     getAllPurchases,
     getStaffHistory,
-    generateReceiptPDF };
+    generateReceiptPDF,
+    handlePaystackWebhook
+};

@@ -1,5 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const purchaseController = require('../controllers/purchaseController');
+
+router.post(
+  '/paystack-webhook',
+  express.raw({ type: 'application/json' }),
+  purchaseController.handlePaystackWebhook
+);
 
 const {
   initializePurchase,
@@ -10,7 +17,7 @@ const {
   markCollected,
   getAllPurchases,
   getStaffHistory
-} = require('../controllers/purchaseController');
+} = purchaseController;
 
 const { authenticate, authorize } = require('../middleware/authMiddleware');
 
