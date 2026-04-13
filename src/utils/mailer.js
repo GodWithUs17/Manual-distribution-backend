@@ -34,9 +34,9 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS
   },
   // --- ADDED SETTINGS FOR RELIABILITY ---
-  connectionTimeout: 10000, // 10 seconds - stops the infinite "ETIMEDOUT"
-  greetingTimeout: 10000,   // 10 seconds
-  socketTimeout: 15000,     // 15 seconds
+  connectionTimeout: 20000, // 10 seconds - stops the infinite "ETIMEDOUT"
+  greetingTimeout: 20000,   // 10 seconds
+  socketTimeout: 20000,     // 15 seconds
   pool: true,               // Uses a pooled connection (faster for multiple students)
   maxConnections: 5,        // Limit connections to avoid Gmail spam blocks
   tls: {

@@ -141,11 +141,11 @@ const getReceipt = async (req, res) => {
       include: { manual: true }
     });
 
-    if (!purchase) {
+    if (!purchase) {  
       return res.status(404).json({ message: 'No valid receipt found' });
     }
 
-    console.log("Sending to:", purchase.email);
+    console.log("Sending to:" , purchase.email);
 
     const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${purchase.qrToken}`;
 
@@ -265,12 +265,55 @@ const verifyPayment = async (req, res) => {
   }
 };
 
+// const handlePaystackWebhook = async (req, res) => {
+//   try {
+//     const signature = req.headers['x-paystack-signature'];
+//     if (!signature) {
+//       return res.status(400).send('Missing Paystack signature');
+//     }
+
+//     const rawBody = Buffer.isBuffer(req.body)
+//       ? req.body
+//       : Buffer.from(JSON.stringify(req.body));
+
+//     const hash = crypto
+//       .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
+//       .update(rawBody)
+//       .digest('hex');
+
+//     if (hash !== signature) {
+//       return res.status(401).send('Invalid signature');
+//     }
+
+//     const payload = Buffer.isBuffer(req.body)
+//       ? JSON.parse(rawBody.toString('utf8'))
+//       : req.body;
+
+//     if (!payload || !payload.event) {
+//       return res.status(400).send('Invalid webhook payload');
+//     }
+
+//     if (payload.event !== 'charge.success' && payload.event !== 'transaction.success') {
+//       return res.status(200).send('Ignored event');
+//     }
+
+//     const reference = payload.data?.reference;
+//     if (!reference) {
+//       return res.status(400).send('Missing reference');
+//     }
+
+//     await processSuccessfulPayment(reference);
+//     return res.status(200).send('Webhook processed');
+//   } catch (error) {
+//     console.error('Paystack webhook error:', error);
+//     return res.status(500).send('Webhook processing failed');
+//   }
+// };
+
 const handlePaystackWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-paystack-signature'];
-    if (!signature) {
-      return res.status(400).send('Missing Paystack signature');
-    }
+    if (!signature) return res.status(400).send('Missing Paystack signature');
 
     const rawBody = Buffer.isBuffer(req.body)
       ? req.body
@@ -281,32 +324,32 @@ const handlePaystackWebhook = async (req, res) => {
       .update(rawBody)
       .digest('hex');
 
-    if (hash !== signature) {
-      return res.status(401).send('Invalid signature');
+    if (hash !== signature) return res.status(401).send('Invalid signature');
+
+    const payload = JSON.parse(rawBody.toString('utf8'));
+
+    if (payload.event === 'charge.success') {
+      const reference = payload.data?.reference;
+      
+      // --- THE KEY CHANGE ---
+      // 1. Respond to Paystack IMMEDIATELY with 200 OK
+      res.status(200).send('Webhook received');
+
+      // 2. Run the email/PDF logic in the background (no 'await')
+      processSuccessfulPayment(reference).catch(err => {
+        console.error('Background Processing Error:', err.message);
+      });
+      
+      return; // Exit here
     }
 
-    const payload = Buffer.isBuffer(req.body)
-      ? JSON.parse(rawBody.toString('utf8'))
-      : req.body;
-
-    if (!payload || !payload.event) {
-      return res.status(400).send('Invalid webhook payload');
-    }
-
-    if (payload.event !== 'charge.success' && payload.event !== 'transaction.success') {
-      return res.status(200).send('Ignored event');
-    }
-
-    const reference = payload.data?.reference;
-    if (!reference) {
-      return res.status(400).send('Missing reference');
-    }
-
-    await processSuccessfulPayment(reference);
-    return res.status(200).send('Webhook processed');
+    return res.status(200).send('Event ignored');
   } catch (error) {
     console.error('Paystack webhook error:', error);
-    return res.status(500).send('Webhook processing failed');
+    // Even if it fails, don't let the server crash
+    if (!res.headersSent) {
+        return res.status(500).send('Webhook processing failed');
+    }
   }
 };
 
