@@ -1,60 +1,34 @@
-// const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-// const transporter = nodemailer.createTransport({
-//   host: process.env.EMAIL_HOST || "smtp.gmail.com",
-//   port: 587,
-//   secure: false, // Must be false for port 587
-//   auth: {
-//     user: process.env.EMAIL_USER,
-//     pass: process.env.EMAIL_PASS, // Use 16-character App Password here
-//   },
-//   pool: true,
-//   maxConnections: 3, // Lowered slightly to be more stable on free-tier hosting
-//   connectionTimeout: 40000, // Increased to 40s to handle slow network handshakes
-//   greetingTimeout: 40000,
-//   socketTimeout: 60000, // 60s to ensure the PDF buffer fully uploads
-//   tls: {
-//     family: 4, 
-//     rejectUnauthorized: false 
-//   }
-// });
+// Initialize Resend with your API Key from Render/Env
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// // We keep the verify block but wrap it so it doesn't crash the startup
-// transporter.verify((error) => {
-//   if (error) {
-//     console.warn('⚠️ Mailer Verification Failed (Server will still run):', error.message);
-//   } else {
-//     console.log('✅ Mailer Ready');
-//   }
-// });
+const sendManualEmail = async ({ to, subject, html, pdfBuffer, filename }) => {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: 'LAUTECH Manuals <onboarding@resend.dev>', // Keep this for testing
+      to: [to],
+      subject: subject,
+      html: html,
+      attachments: [
+        {
+          filename: filename,
+          content: pdfBuffer, // Resend accepts the Buffer directly
+        },
+      ],
+    });
 
-// module.exports = transporter;
+    if (error) {
+      console.error('❌ Resend API Error:', error);
+      return null;
+    }
 
-const nodemailer = require('nodemailer');
-
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, 
-  auth: {
-    user: "lautechmanual@gmail.com", // Your Gmail
-    pass: "tnskvvsbicrxeyss"      // Your 16-character App Password (no spaces)
-  },
-  connectionTimeout: 40000,
-  greetingTimeout: 40000,
-  socketTimeout: 60000,
-  tls: {
-    family: 4,
-    rejectUnauthorized: false 
+    console.log('✅ Email sent successfully via Resend:', data.id);
+    return data;
+  } catch (err) {
+    console.error('❌ Unexpected Mailer Error:', err.message);
+    return null;
   }
-});
+};
 
-transporter.verify((error) => {
-  if (error) {
-    console.log('❌ STILL TIMING OUT:', error.message);
-  } else {
-    console.log('✅ HARDCODE SUCCESS: The connection works!');
-  }
-});
-
-module.exports = transporter; 
+module.exports = { sendManualEmail };
