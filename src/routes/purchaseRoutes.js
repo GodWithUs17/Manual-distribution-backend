@@ -16,7 +16,8 @@ const {
   verifyQR,
   markCollected,
   getAllPurchases,
-  getStaffHistory
+  getStaffHistory,
+  getReceiptByDetails
 } = purchaseController;
 
 const { authenticate, authorize } = require('../middleware/authMiddleware');
@@ -31,6 +32,11 @@ router.post('/recover-reference', recoverReference);
 router.get(
   '/verify/:reference',
   verifyQR
+);
+
+router.get(
+  '/download-receipt',
+  getReceiptByDetails
 );
 
 // Admin-only: Get all purchases for the dashboard

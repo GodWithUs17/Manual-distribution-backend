@@ -647,6 +647,51 @@ const generateReceiptPDF = (purchase, qrCodeBuffer) => {
   });
 };
 
+
+const getReceiptByDetails = async (req, res) => {
+  // We get matricNo and courseCode (e.g., "ANB 301") from the student
+  const { matricNo, courseCode } = req.query; 
+
+  console.log("--- New Download Request ---");
+console.log("Input Matric:", matricNo);
+console.log("Input CourseCode:", courseCode);
+
+  try {
+    const purchase = await prisma.purchase.findFirst({
+      where: {
+        matricNo: matricNo.trim(),
+        status: 'paid',
+        manual: {
+          courseCode: {
+        equals: courseCode.trim(),
+        mode: 'insensitive' // 👈 This makes "ans301" match "ANS 301"
+      }
+        }
+      },
+      include: { manual: true }
+    });
+
+    if (!purchase) {
+      return res.status(404).json({ 
+        error: 'No paid record found. Please check your Matric No and Course Code.' 
+      });
+    }
+
+    // Generate QR and PDF (Same as before)
+    const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${purchase.qrToken}`;
+    const qrBuffer = await QRCode.toBuffer(qrUrl);
+    const pdfBuffer = await generateReceiptPDF(purchase, qrBuffer);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=${courseCode}_Receipt.pdf`);
+    return res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = { initializePurchase,
    verifyPayment,
     getReceipt, 
@@ -656,5 +701,6 @@ module.exports = { initializePurchase,
     getAllPurchases,
     getStaffHistory,
     generateReceiptPDF,
-    handlePaystackWebhook
+    handlePaystackWebhook,
+    getReceiptByDetails
 };
