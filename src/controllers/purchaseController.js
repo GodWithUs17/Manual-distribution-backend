@@ -356,7 +356,7 @@ const verifyPayment = async (req, res) => {
     }
 
     const flutterwaveRes = await axios.get(
-      `https://api.flutterwave.com/v3/transactions/verify/${encodeURIComponent(verificationKey)}`,
+      `https://api.flutterwave.com/v3/transactions/${encodeURIComponent(verificationKey)}/verify`,
       {
         headers: {
           Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
