@@ -5,14 +5,9 @@ dist/
 # Environment variables (CRITICAL)
 .env
 .env.local
-.env.example
 .env.production
 
-# Prisma
-/prisma/migrations/
-# Only include the line below if you are generating prisma to a custom folder
-# /src/generated/prisma
-
+    
 # Logs
 npm-debug.log*
 yarn-debug.log*

@@ -1,32 +1,153 @@
-# Manual Distribution Backend
+# LAUTECH Manual Distribution Backend
 
-This backend powers the manual sales, payment verification, receipt generation, admin workflows, and staff collection process for the LAUTECH distribution platform.
+A production-oriented REST API powering a digital manual purchasing and collection platform for the **Ladoke Akintola University of Technology (LAUTECH)**.
 
-It is built with Node.js, Express, Prisma, and PostgreSQL, and integrates with Paystack for payment processing, Resend for email delivery, and Cloudinary for image uploads.
+The system replaces a manual lecturer → course representative → student distribution workflow with a centralized platform for **manual management, student purchases, online payments, digital receipts, QR verification, staff collection, and administrative operations**.
 
-## Overview
+> **Flagship project:** Full-stack academic commerce and distribution system built with Node.js, Express, Prisma, PostgreSQL, Flutterwave, Resend, and Cloudinary.
 
-The service provides the following core capabilities:
+---
 
-- user authentication and role-based access control
-- manual catalog management for admins
-- public manual browsing and purchase flow
-- Paystack payment initialization and verification
-- webhook-based payment confirmation
-- Digital receipt generation and email delivery
-- staff collection and record tracking
-- admin dashboards for manual and staff management
+## What Problem Does It Solve?
+
+Traditional manual distribution can create problems such as:
+
+* delayed manual collection
+* incomplete payment records
+* difficulty tracking students who have paid
+* manual reconciliation of sales
+* missing or duplicated records
+* limited visibility for administrators
+* difficulty verifying whether a student has already collected a manual
+
+This backend centralizes the workflow and provides a structured digital record of purchases from payment through physical collection.
+
+---
+
+## Core Features
+
+### Student Purchase Flow
+
+* Browse available manuals
+* Submit student information
+* Validate manual availability
+* Initialize online payment
+* Verify Paystack transactions
+* Track purchase references
+* Recover payment references
+* Retrieve digital receipts
+
+### Payment Processing
+
+* Paystack payment initialization
+* Transaction verification
+* Paystack webhook handling
+* Purchase status tracking
+* Payment reference generation
+* Duplicate pending-purchase cleanup
+* Payment-to-purchase record association
+
+### Digital Receipts
+
+After successful payment, the system can:
+
+* generate a PDF receipt
+* generate a QR verification token
+* associate the receipt with the purchase
+* deliver the receipt by email
+
+### QR Verification & Collection
+
+Staff can verify a student's purchase and record the physical collection of the manual.
+
+The collection workflow records:
+
+* purchase
+* collection status
+* collection timestamp
+* staff member responsible for collection
+
+### Manual Management
+
+Authorized administrators can:
+
+* create manuals
+* update manual information
+* upload manual images
+* activate/deactivate manuals
+* manage stock
+* restock manuals
+* delete manuals
+
+### Staff & Administration
+
+The system supports role-based access for:
+
+* `super_admin`
+* `admin`
+* `staff`
+
+Administrative capabilities include staff management, purchase records, and operational reporting.
+
+---
+
+## Architecture
+
+```text
+Student / Staff / Admin
+          │
+          ▼
+      React Frontend
+          │
+          ▼
+    REST API (Express)
+          │
+     ┌────┴─────┐
+     ▼          ▼
+   Prisma    External APIs
+     │        ├─ Paystack
+     │        ├─ Resend
+     │        └─ Cloudinary
+     ▼
+ PostgreSQL
+```
+
+The backend follows a layered Express architecture:
+
+```text
+Request
+   ↓
+Express Middleware
+   ↓
+Routes
+   ↓
+Controllers
+   ↓
+Prisma ORM
+   ↓
+PostgreSQL
+```
+
+---
 
 ## Tech Stack
 
-- Node.js 22+
-- Express.js
-- Prisma ORM
-- PostgreSQL
-- Paystack
-- Resend
-- Cloudinary
-- JWT-based authentication
+| Technology | Purpose                   |
+| ---------- | ------------------------- |
+| Node.js    | JavaScript runtime        |
+| Express.js | REST API framework        |
+| Prisma     | ORM and database access   |
+| PostgreSQL | Relational database       |
+| Paystack   | Online payment processing |
+| Resend     | Transactional email       |
+| Cloudinary | Image storage             |
+| JWT        | Authentication            |
+| Multer     | File uploads              |
+| PDFKit     | PDF receipt generation    |
+| QRCode     | QR token generation       |
+| ExcelJS    | Purchase data export      |
+
+---
 
 ## Project Structure
 
@@ -34,165 +155,240 @@ The service provides the following core capabilities:
 manual-distribution-backend/
 ├── prisma/
 │   ├── schema.prisma
-│   ├── seed.js
-│   └── migrations/
+│   └── seed.js
+│
 ├── src/
-│   ├── app.js
 │   ├── controllers/
 │   ├── middleware/
 │   ├── routes/
 │   ├── utils/
 │   ├── assets/
-│   └── uploads/
+│   └── app.js
+│
+├── cloudinaryConfig.js
+├── prisma.config.ts
+├── server.js
+├── package.json
+├── API.md
+├── ARCHITECTURE.md
 ├── .env.example
 ├── .gitignore
-├── cloudinaryConfig.js
-├── package.json
-├── server.js
-├── README.md
-└── uploads/
+└── README.md
 ```
 
-## Requirements
+---
 
-Before running the project, ensure you have:
+## API Modules
 
-- Node.js 20 or later
-- PostgreSQL database running
-- valid environment variables configured in a local `.env` file
-- access to Paystack secret keys and optional email provider credentials
+| Module           | Responsibility                               |
+| ---------------- | -------------------------------------------- |
+| `/api/auth`      | Authentication and password recovery         |
+| `/api/manuals`   | Manual catalog and inventory management      |
+| `/api/purchases` | Purchases, payments, receipts and collection |
+| `/api/admin`     | Staff and administrative operations          |
 
-## Environment Configuration
+See [`API.md`](./API.md) for the endpoint reference.
 
-Create a local environment file based on your project template:
+---
+
+## Authentication & Authorization
+
+Protected operations use JWT authentication and role-based authorization.
+
+The API separates:
+
+* public student operations
+* authenticated staff operations
+* administrator operations
+* super administrator operations
+
+This allows students to complete the purchase process without exposing privileged management functionality.
+
+---
+
+## Payment Flow
+
+```text
+Student selects manual
+        ↓
+Purchase initialized
+        ↓
+Pending purchase created
+        ↓
+Paystack checkout
+        ↓
+Payment completed
+        ↓
+Webhook / verification
+        ↓
+Purchase marked as paid
+        ↓
+QR token generated
+        ↓
+PDF receipt generated
+        ↓
+Receipt delivered by email
+        ↓
+Student presents QR/reference
+        ↓
+Staff verifies purchase
+        ↓
+Manual marked as collected
+```
+
+---
+
+## Database Model
+
+The core database entities are:
+
+```text
+User
+ │
+ └── Purchase
+
+Manual
+ │
+ └── Purchase
+```
+
+A purchase stores the student's information, selected manual, payment information, collection status, QR token, and staff collection record.
+
+---
+
+## Local Development
+
+### Requirements
+
+* Node.js 20+
+* PostgreSQL
+* Paystack account/API credentials
+* Cloudinary account/API credentials
+* Resend account/API credentials
+
+### Installation
+
+```bash
+npm install
+```
+
+Create your environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Then populate the file with the required values, including:
+Configure the required environment variables.
 
-- `DATABASE_URL`
-- `DIRECT_URL`
-- `JWT_SECRET`
-- `PAYSTACK_SECRET_KEY`
-- `FRONTEND_URL`
-- `BASE_URL`
-- `CLOUDINARY_CLOUD_NAME`
-- `CLOUDINARY_API_KEY`
-- `CLOUDINARY_API_SECRET`
-- `RESEND_API_KEY`
-- `PORT` (optional)
-
-## Database Setup
-
-Generate the Prisma client:
+Generate Prisma Client:
 
 ```bash
 npx prisma generate
 ```
 
-Run the database migrations:
+Run database migrations:
 
 ```bash
 npx prisma migrate deploy
 ```
 
-For local development, you may also initialize data using:
-
-```bash
-node prisma/seed.js
-```
-
-## Local Development
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Start the app in development mode:
+Start development:
 
 ```bash
 npm run dev
 ```
 
-The backend is served on:
+The API will run on:
 
 ```text
 http://localhost:5000
 ```
 
-## Production Start
+---
+
+## Environment Variables
+
+The application uses environment variables for credentials and deployment configuration.
+
+Typical configuration includes:
+
+```text
+PORT
+BASE_URL
+FRONTEND_URL
+DATABASE_URL
+DIRECT_URL
+JWT_SECRET
+PAYSTACK_SECRET_KEY
+CLOUDINARY_CLOUD_NAME
+CLOUDINARY_API_KEY
+CLOUDINARY_API_SECRET
+RESEND_API_KEY
+SEED_ADMIN_EMAIL
+SEED_ADMIN_PASSWORD
+```
+
+**Never commit real credentials or `.env` files to GitHub.**
+
+---
+
+## Available Scripts
 
 ```bash
+npm run dev
 npm start
 ```
 
-## Main API Groups
+---
 
-- `/` — API status message
-- `/health` — health check endpoint
-- `/api/auth` — authentication, password reset, and account access
-- `/api/manuals` — public and admin manual operations
-- `/api/purchases` — payment initialization, verification, webhooks, receipts, and student history
-- `/api/admin` — admin and staff management
+## Related Frontend
 
-## Authentication and Authorization
+The backend is designed to work with the companion React frontend.
 
-Protected routes use JWT-based authentication and role checks. The application distinguishes between:
+**Frontend repository:** `Manual-distribution-frontend`
 
-- public browsing and purchase flows
-- staff/admin-only protected operations
+---
 
-This separation ensures that public students can browse and pay for manuals while privileged routes remain guarded.
+## Engineering Highlights
 
-## Payment Flow
+This project demonstrates practical full-stack engineering beyond a simple CRUD application:
 
-The payment system supports the following process:
+* REST API design
+* relational database modeling
+* Prisma ORM
+* JWT authentication
+* role-based authorization
+* payment gateway integration
+* webhook processing
+* transactional purchase workflows
+* PDF generation
+* QR-based verification
+* cloud image storage
+* transactional email
+* inventory management
+* staff collection tracking
+* administrative reporting
 
-1. client submits manual purchase details
-2. backend creates a pending purchase record
-3. Paystack initializes the transaction
-4. student completes the payment on Paystack
-5. Paystack webhook and verification endpoints confirm the transaction
-6. the system marks the purchase as paid
-7. a receipt PDF is generated and emailed
+---
 
-## Receipt and Email Workflow
+## Project Status
 
-After successful payment, the backend generates a receipt document and sends it by email with the student’s payment details and QR verification information.
+This repository is actively being refined with a focus on:
 
-This process is designed to be transactional and reliable, with duplicate-payment protection and webhook idempotency checks.
+* maintainable architecture
+* reliable payment processing
+* secure authentication
+* database integrity
+* production deployment practices
+* clear API documentation
+* automated testing
 
-## Security Guidelines
+---
 
-To keep the platform production-safe:
+## Author
 
-- never commit `.env` files
-- rotate API and secret keys regularly
-- use HTTPS in production
-- validate all incoming payloads
-- keep JWT secrets separate from payment secrets
-- protect all admin/staff endpoints with proper authorization
-- ensure webhook signatures are verified before processing
+**Oguntoke Emmanuel Omotayo**
 
-## Scripts
+Full-Stack Web Developer
 
-```bash
-npm install
-npm run dev
-npm run start
-```
-
-## Operational Notes
-
-- the platform expects the frontend to send valid JWT tokens for protected requests
-- admin inventory may be configured from the dashboard
-- stock availability is enforced on the backend to prevent overselling
-- webhook processing should always be validated and treated as idempotent-safe
-
-## Contributing
-
-Contributions should be made with careful attention to security, DB integrity, route protection, and app stability. Any change involving payment processing, authentication, or webhook handling should be tested thoroughly before deployment.
+I build web applications that solve real operational problems — from business websites and booking systems to custom platforms with payments, dashboards, databases, and automation.

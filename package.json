@@ -1,16 +1,26 @@
 {
   "name": "manual-distribution-backend",
   "version": "1.0.0",
+  "description": "REST API for a digital academic manual purchasing, payment, receipt, QR verification, and collection platform.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "build": "npm install && npx prisma generate",
     "dev": "nodemon server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "nodejs",
+    "express",
+    "prisma",
+    "postgresql",
+    "Flutterwave",
+    "rest-api",
+    "payment-processing",
+    "qr-verification",
+    "inventory-management"
+  ],
+  "author": "Oguntoke Emmanuel Omotayo",
+  "license": "MIT",
   "dependencies": {
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^6.19.2",
