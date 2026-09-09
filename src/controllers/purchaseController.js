@@ -260,15 +260,22 @@ const processSuccessfulPayment = async (reference) => {
   let wasAlreadyPaid = false;
 
   await prisma.$transaction(async (tx) => {
-    const lockedPurchase = await tx.$queryRaw`
-      SELECT p.*, m.*
+    const lockedPurchaseRows = await tx.$queryRaw`
+      SELECT p."id" AS "purchaseId"
       FROM "Purchase" p
-      JOIN "Manual" m ON m.id = p."manualId"
       WHERE p."transactionRef" = ${reference}
       FOR UPDATE
     `;
 
-    const purchase = Array.isArray(lockedPurchase) ? lockedPurchase[0] : null;
+    if (!Array.isArray(lockedPurchaseRows) || lockedPurchaseRows.length === 0) {
+      throw new Error(`Purchase not found for reference: ${reference}`);
+    }
+
+    const purchaseId = Number(lockedPurchaseRows[0].purchaseId);
+    const purchase = await tx.purchase.findUnique({
+      where: { id: purchaseId },
+      include: { manual: true }
+    });
 
     if (!purchase) {
       throw new Error(`Purchase not found for reference: ${reference}`);
@@ -276,18 +283,7 @@ const processSuccessfulPayment = async (reference) => {
 
     if (purchase.status === 'paid') {
       wasAlreadyPaid = true;
-      updatedPurchase = {
-        ...purchase,
-        manual: {
-          id: purchase.manualId,
-          title: purchase.title,
-          courseCode: purchase.courseCode,
-          price: purchase.price,
-          imageURL: purchase.imageURL,
-          isActive: purchase.isActive,
-          createdAt: purchase.createdAt,
-        }
-      };
+      updatedPurchase = purchase;
       return;
     }
 
@@ -344,6 +340,10 @@ const verifyPayment = async (req, res) => {
     }
 
     const updatedPurchase = await processSuccessfulPayment(reference);
+
+    if (!updatedPurchase) {
+      return res.status(404).json({ error: 'Purchase record could not be found for verification.' });
+    }
 
     return res.status(200).json({
       message: 'Payment verified and receipt sent successfully',
