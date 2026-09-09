@@ -8,6 +8,12 @@ router.post(
   purchaseController.handlePaystackWebhook
 );
 
+router.post(
+  '/flutterwave-webhook',
+  express.raw({ type: 'application/json' }),
+  purchaseController.handleFlutterwaveWebhook
+);
+
 const {
   initializePurchase,
   verifyPayment,

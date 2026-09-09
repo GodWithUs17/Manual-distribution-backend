@@ -39,6 +39,7 @@ const limiter = rateLimit({
 
 app.use(limiter);
 app.use('/api/purchases/paystack-webhook', express.raw({ type: 'application/json' }));
+app.use('/api/purchases/flutterwave-webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/api/purchases', purchaseRoutes);

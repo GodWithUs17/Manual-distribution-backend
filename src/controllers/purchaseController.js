@@ -60,7 +60,7 @@ const verifyQR = async (req, res) => {
     const purchase = await prisma.purchase.findFirst({
       where: {
         OR: [
-          { transactionRef: reference }, // Check the Paystack Ref
+          { transactionRef: reference }, // Check the payment reference
           { qrToken: reference }        // Check the unique QR Token
         ]
       },
@@ -326,17 +326,21 @@ const verifyPayment = async (req, res) => {
   }
 
   try {
-    const paystackRes = await axios.get(
-      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+    const flutterwaveRes = await axios.get(
+      `https://api.flutterwave.com/v3/transactions/verify/${encodeURIComponent(reference)}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
         },
       }
     );
 
-    if (paystackRes.data.data.status !== 'success') {
-      return res.status(400).json({ error: 'Payment has not been completed on Paystack' });
+    const isSuccessful =
+      flutterwaveRes.data?.status === 'success' &&
+      ['successful', 'success'].includes(flutterwaveRes.data?.data?.status);
+
+    if (!isSuccessful) {
+      return res.status(400).json({ error: 'Payment has not been completed on Flutterwave' });
     }
 
     const updatedPurchase = await processSuccessfulPayment(reference);
@@ -355,52 +359,56 @@ const verifyPayment = async (req, res) => {
   }
 };
 
-const handlePaystackWebhook = async (req, res) => {
+const handleFlutterwaveWebhook = async (req, res) => {
   try {
-    const signature = req.headers['x-paystack-signature'];
-    if (!signature) return res.status(400).send('Missing Paystack signature');
+    const signature = req.headers['x-flw-signature'];
+    if (!signature) return res.status(400).send('Missing Flutterwave signature');
 
     const rawBody = Buffer.isBuffer(req.body)
       ? req.body
       : Buffer.from(JSON.stringify(req.body));
 
     const hash = crypto
-      .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
+      .createHmac('sha256', process.env.FLW_WEBHOOK_SECRET || process.env.FLW_SECRET_KEY)
       .update(rawBody)
       .digest('hex');
 
     if (hash !== signature) return res.status(401).send('Invalid signature');
 
     const payload = JSON.parse(rawBody.toString('utf8'));
+    const event = payload.event;
+    const txRef = payload.data?.tx_ref || payload.data?.txRef;
 
-    if (payload.event === 'charge.success') {
-      const reference = payload.data?.reference;
-      const eventKey = payload.data?.id ? `paystack:${payload.data.id}` : `paystack:${reference}`;
+    if (event === 'charge.completed' || payload.data?.status === 'successful') {
+      if (!txRef) {
+        return res.status(200).send('Event ignored: missing tx_ref');
+      }
 
+      const eventKey = `flutterwave:${txRef}`;
       if (isDuplicateWebhookEvent(eventKey)) {
         return res.status(200).send('Duplicate webhook ignored');
       }
 
-      // --- THE KEY CHANGE ---
-      // 1. Respond to Paystack IMMEDIATELY with 200 OK
       res.status(200).send('Webhook received');
 
-      // 2. Run the email/PDF logic in the background (no 'await')
-      processSuccessfulPayment(reference).catch(err => {
+      processSuccessfulPayment(txRef).catch(err => {
         console.error('Background Processing Error:', err.message);
       });
-      
-      return; // Exit here
+
+      return;
     }
 
     return res.status(200).send('Event ignored');
   } catch (error) {
-    console.error('Paystack webhook error:', error);
-    // Even if it fails, don't let the server crash
+    console.error('Flutterwave webhook error:', error);
     if (!res.headersSent) {
-        return res.status(500).send('Webhook processing failed');
+      return res.status(500).send('Webhook processing failed');
     }
   }
+};
+
+const handlePaystackWebhook = async (req, res) => {
+  return handleFlutterwaveWebhook(req, res);
 };
 
 // Function to create a new purchase
@@ -482,28 +490,38 @@ const initializePurchase = async (req, res) => {
             });
         });
 
-        // 4. Call Paystack Initialize (Direct Redirect Method)
+        // 4. Initialize the Flutterwave checkout session
 
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
 
-    const paystackRes = await axios.post(
-      "https://api.paystack.co/transaction/initialize",
+    const flutterwaveRes = await axios.post(
+      "https://api.flutterwave.com/v3/payments",
       {
-        email: email.trim(),
-        amount: manual.price * 100, 
-        reference: reference, // Tell Paystack to use our REF
-        callback_url: `${frontendUrl}/verify-payment`, 
+        tx_ref: reference,
+        amount: String(manual.price),
+        currency: "NGN",
+        redirect_url: `${frontendUrl}/verify-payment`,
+        payment_options: "card,banktransfer,ussd",
+        customer: {
+          email: email.trim(),
+          name: fullName.trim(),
+        },
+        customizations: {
+          title: manual.title,
+          description: `Payment for ${manual.title}`,
+          logo: process.env.FRONTEND_LOGO_URL || undefined,
+        },
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
           "Content-Type": "application/json",
         },
       }
     );
 
         // 5. OPTIONAL: NON-BLOCKING MAILER
-        // We do NOT 'await' this so that the student gets the Paystack window immediately.
+        // We do NOT 'await' this so the student can continue to the Flutterwave checkout immediately.
         try {
             // Replace with your actual mail function if you have one
             // sendInitEmail(email, fullName, manual.title, reference);   
@@ -515,7 +533,9 @@ const initializePurchase = async (req, res) => {
         // 6. RETURN SUCCESS TO FRONTEND
         return res.status(201).json({ 
             message: 'Purchase initialized successfully',
-            authorization_url: paystackRes.data.data.authorization_url, 
+            authorization_url: flutterwaveRes.data?.data?.link || flutterwaveRes.data?.data?.checkout_url,
+            payment_url: flutterwaveRes.data?.data?.link || flutterwaveRes.data?.data?.checkout_url,
+            reference: reference,
             purchase: newPurchase 
         });
 
@@ -704,15 +724,17 @@ console.log("Input CourseCode:", courseCode);
   }
 };
 
-module.exports = { initializePurchase,
-   verifyPayment,
-    getReceipt, 
-    recoverReference, 
-    verifyQR, 
-    markCollected,
-    getAllPurchases,
-    getStaffHistory,
-    generateReceiptPDF,
-    handlePaystackWebhook,
-    getReceiptByDetails
+module.exports = {
+  initializePurchase,
+  verifyPayment,
+  getReceipt,
+  recoverReference,
+  verifyQR,
+  markCollected,
+  getAllPurchases,
+  getStaffHistory,
+  generateReceiptPDF,
+  handlePaystackWebhook,
+  handleFlutterwaveWebhook,
+  getReceiptByDetails
 };
