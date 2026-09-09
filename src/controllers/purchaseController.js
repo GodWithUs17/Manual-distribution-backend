@@ -330,17 +330,22 @@ const processSuccessfulPayment = async (reference) => {
 };
 
 const verifyPayment = async (req, res) => {
-  const { reference } = req.body;
+  const { reference, tx_ref, transaction_id } = req.body;
+  const verificationKey = transaction_id || reference || tx_ref;
 
-  if (!reference) {
+  if (!verificationKey) {
     return res.status(400).json({ error: 'Transaction reference is required' });
   }
 
   try {
-    const existingPurchase = await prisma.purchase.findFirst({
-      where: { transactionRef: reference },
-      include: { manual: true }
-    });
+    const directRef = tx_ref || reference;
+
+    const existingPurchase = directRef
+      ? await prisma.purchase.findFirst({
+          where: { transactionRef: directRef },
+          include: { manual: true }
+        })
+      : null;
 
     if (existingPurchase?.status === 'paid') {
       return res.status(200).json({
@@ -351,13 +356,20 @@ const verifyPayment = async (req, res) => {
     }
 
     const flutterwaveRes = await axios.get(
-      `https://api.flutterwave.com/v3/transactions/verify/${encodeURIComponent(reference)}`,
+      `https://api.flutterwave.com/v3/transactions/verify/${encodeURIComponent(verificationKey)}`,
       {
         headers: {
           Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
         },
       }
     );
+
+    const verifiedTxRef =
+      flutterwaveRes.data?.data?.tx_ref ||
+      flutterwaveRes.data?.data?.txRef ||
+      directRef ||
+      reference ||
+      tx_ref;
 
     const isSuccessful =
       flutterwaveRes.data?.status === 'success' &&
@@ -370,10 +382,13 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    const updatedPurchase = await processSuccessfulPayment(reference);
+    const updatedPurchase = await processSuccessfulPayment(verifiedTxRef);
 
     if (!updatedPurchase) {
-      return res.status(404).json({ error: 'Purchase record could not be found for verification.' });
+      return res.status(404).json({
+        error: 'Purchase record could not be found for verification.',
+        reference: verifiedTxRef
+      });
     }
 
     return res.status(200).json({
