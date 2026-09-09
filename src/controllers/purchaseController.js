@@ -225,14 +225,25 @@ const processReceiptQueue = async () => {
     isReceiptQueueProcessing = false;
 
     if (receiptQueue.length > 0) {
-      processReceiptQueue();
+      setImmediate(() => {
+        processReceiptQueue().catch((error) => {
+          console.error('Receipt queue restart failed:', error.message);
+        });
+      });
     }
   }
 };
 
 const queueReceiptProcessing = (purchase, reference) => {
   receiptQueue.push({ purchase, reference });
-  processReceiptQueue();
+
+  if (!isReceiptQueueProcessing) {
+    setImmediate(() => {
+      processReceiptQueue().catch((error) => {
+        console.error('Receipt queue failed to start:', error.message);
+      });
+    });
+  }
 };
 
 const webhookEventCache = new Map();
@@ -326,6 +337,19 @@ const verifyPayment = async (req, res) => {
   }
 
   try {
+    const existingPurchase = await prisma.purchase.findFirst({
+      where: { transactionRef: reference },
+      include: { manual: true }
+    });
+
+    if (existingPurchase?.status === 'paid') {
+      return res.status(200).json({
+        message: 'Payment already confirmed',
+        purchase: existingPurchase,
+        alreadyPaid: true
+      });
+    }
+
     const flutterwaveRes = await axios.get(
       `https://api.flutterwave.com/v3/transactions/verify/${encodeURIComponent(reference)}`,
       {
@@ -340,7 +364,10 @@ const verifyPayment = async (req, res) => {
       ['successful', 'success'].includes(flutterwaveRes.data?.data?.status);
 
     if (!isSuccessful) {
-      return res.status(400).json({ error: 'Payment has not been completed on Flutterwave' });
+      return res.status(400).json({
+        error: 'Payment has not been completed on Flutterwave',
+        details: process.env.NODE_ENV !== 'production' ? flutterwaveRes.data : undefined,
+      });
     }
 
     const updatedPurchase = await processSuccessfulPayment(reference);
@@ -351,11 +378,17 @@ const verifyPayment = async (req, res) => {
 
     return res.status(200).json({
       message: 'Payment verified and receipt sent successfully',
-      purchase: updatedPurchase
+      purchase: updatedPurchase,
+      alreadyPaid: false
     });
   } catch (error) {
-    console.error('verifyPayment error:', error.response?.data || error.message);
-    return res.status(500).json({ error: 'Internal server error during verification' });
+    const flutterwaveDetails = error.response?.data;
+    console.error('verifyPayment error:', flutterwaveDetails || error.message);
+
+    return res.status(500).json({
+      error: 'Internal server error during verification',
+      details: process.env.NODE_ENV !== 'production' ? flutterwaveDetails || error.message : undefined,
+    });
   }
 };
 
