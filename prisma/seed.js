@@ -2,22 +2,32 @@ const prisma = require("../src/utils/prisma");
 const bcrypt = require("bcrypt");
 
 async function main() {
-    const passwordHash = await bcrypt.hash("admin123", 10);
+    const email = process.env.SEED_ADMIN_EMAIL;
+    const password = process.env.SEED_ADMIN_PASSWORD;
+
+    if (!email || !password) {
+        console.log('SEED: SEED_ADMIN_EMAIL or SEED_ADMIN_PASSWORD not provided - skipping admin seed');
+        return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
 
     await prisma.user.upsert({
-        where: { email: 'admin@manual.com' },
+        where: { email },
         update: {},
         create: {
             name: 'Super Admin',
-            email: 'admin@manual.com',
+            email,
             passwordHash,
             role: 'super_admin',
         }
     });
 
-    console.log("Super Admin user created/updated");
+    console.log('SEED: Super Admin user created/updated for', email);
 }
 
 main()
-    .catch(console.error)
+    .catch((err) => {
+        console.error('SEED ERROR:', err);
+    })
     .finally(() => prisma.$disconnect());

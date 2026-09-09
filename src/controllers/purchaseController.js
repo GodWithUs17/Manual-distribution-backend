@@ -1,6 +1,5 @@
 const prisma = require('../utils/prisma');
 const crypto = require('crypto');
-const { v4: uuidv4 } = require('uuid')
 const QRCode = require('qrcode');
 const axios = require('axios');
 const {sendManualEmail} = require('../utils/mailer')
@@ -82,7 +81,7 @@ const verifyQR = async (req, res) => {
     }
 
     // Optional: Check if the student has actually paid
-    if (purchase.status !== 'success' && purchase.status !== 'paid') {
+    if (purchase.status !== 'paid' && purchase.status !== 'success') {
       return res.status(400).json({ 
         status: "UNPAID", 
         error: "Payment is still pending for this student." 
@@ -155,16 +154,18 @@ const getReceipt = async (req, res) => {
 
     console.log("QR Code generated successfully");
 
+    const amountToShow = Number(purchase.amount || (purchase.manual && purchase.manual.price) || 0);
+
     return res.json({
       receipt: {
         id: purchase.id,
         fullName: purchase.fullName,
-        manual: purchase.manual.title,
-        courseCode: purchase.manual.courseCode,
+        manual: purchase.manual ? purchase.manual.title : 'OFFICIAL MANUAL',
+        courseCode: purchase.manual ? purchase.manual.courseCode : null,
         department: purchase.department,
         level: purchase.level,
-        amount: purchase.manual.price,
-        session: "2025/2026",
+        amount: amountToShow,
+        session: process.env.ACADEMIC_SESSION || '2025/2026',
         reference: purchase.transactionRef,
         date: purchase.createdAt,
         qrCode: qrCode
@@ -177,145 +178,147 @@ const getReceipt = async (req, res) => {
   }
 };
 
-// // Shared helper for paid purchases
-// const processSuccessfulPayment = async (reference) => {
-//   const purchase = await prisma.purchase.findFirst({
-//     where: { transactionRef: reference },
-//     include: { manual: true }
-//   });
 
-//   if (!purchase) {
-//     throw new Error(`Purchase not found for reference: ${reference}`);
-//   }
 
-//   if (purchase.status === 'paid') {
-//     return purchase;
-//   }
+const receiptQueue = [];
+let isReceiptQueueProcessing = false;
 
-//   const qrToken = uuidv4();
-//   const updatedPurchase = await prisma.purchase.update({
-//     where: { id: purchase.id },
-//     data: {
-//       status: 'paid',
-//       qrToken,
-//     },
-//     include: { manual: true }
-//   });
+const processReceiptQueue = async () => {
+  if (isReceiptQueueProcessing) {
+    return;
+  }
 
-//   const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${qrToken}`;
-//   const qrBuffer = await QRCode.toBuffer(qrUrl);
-//   const pdfBuffer = await generateReceiptPDF(updatedPurchase, qrBuffer);
+  isReceiptQueueProcessing = true;
 
-//   await transporter.sendMail({
-//     to: updatedPurchase.email,
-//     subject: `LAUTECH Receipt: ${updatedPurchase.manual.title}`,
-//     html: `
-//       <div style="font-family: sans-serif; max-width: 500px; border: 1px solid #eee; padding: 20px;">
-//         <h2 style="color: #003366;">Payment Successful</h2>
-//         <p>Hello <b>${updatedPurchase.fullName}</b>,</p>
-//         <p>Your payment for <b>${updatedPurchase.manual.title}</b> has been confirmed.</p>
-//         <p>Please find your <b>Official Digital Receipt</b> attached as a PDF to this email.</p>
-//         <p>Download it and present the QR code at the collection point to get your manual.</p>
-//         <hr />
-//         <p style="font-size: 11px; color: #888;">Transaction Ref: ${reference}</p>
-//       </div>
-//     `,
-//     attachments: [
-//       {
-//         filename: `LAUTECH_Receipt_${updatedPurchase.id}.pdf`,
-//         content: pdfBuffer,
-//         contentType: 'application/pdf'
-//       }
-//     ]
-//   });
+  try {
+    while (receiptQueue.length > 0) {
+      const job = receiptQueue.shift();
 
-//   return updatedPurchase;
-// };
+      try {
+        const { purchase, reference } = job;
+        const qrUrl = `${process.env.BASE_URL || 'http://localhost:5000'}/api/purchases/verify/${purchase.qrToken}`;
+        const qrBuffer = await QRCode.toBuffer(qrUrl);
+        const pdfBuffer = await generateReceiptPDF(purchase, qrBuffer);
 
-// const verifyPayment = async (req, res) => {
-//   const { reference } = req.body;
+        await sendManualEmail({
+          to: purchase.email,
+          subject: `LAUTECH Receipt: ${purchase.manual.title}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 500px; border: 1px solid #eee; padding: 20px;">
+              <h2 style="color: #003366;">Payment Successful</h2>
+              <p>Hello <b>${purchase.fullName}</b>,</p>
+              <p>Your payment for <b>${purchase.manual.title}</b> has been confirmed.</p>
+              <p>Please find your <b>Official Digital Receipt</b> attached as a PDF to this email.</p>
+              <p>Download it and present the QR code at the collection point to get your manual.</p>
+              <hr />
+              <p style="font-size: 11px; color: #888;">Transaction Ref: ${reference}</p>
+            </div>
+          `,
+          pdfBuffer: pdfBuffer,
+          filename: `LAUTECH_Receipt_${purchase.id}.pdf`
+        });
+      } catch (error) {
+        console.error('Receipt processing background error:', error.message);
+      }
+    }
+  } finally {
+    isReceiptQueueProcessing = false;
 
-//   if (!reference) {
-//     return res.status(400).json({ error: 'Transaction reference is required' });
-//   }
+    if (receiptQueue.length > 0) {
+      processReceiptQueue();
+    }
+  }
+};
 
-//   try {
-//     const paystackRes = await axios.get(
-//       `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-//       {
-//         headers: {
-//           Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-//         },
-//       }
-//     );
+const queueReceiptProcessing = (purchase, reference) => {
+  receiptQueue.push({ purchase, reference });
+  processReceiptQueue();
+};
 
-//     if (paystackRes.data.data.status !== 'success') {
-//       return res.status(400).json({ error: 'Payment has not been completed on Paystack' });
-//     }
+const webhookEventCache = new Map();
+const EVENT_CACHE_TTL_MS = 60 * 60 * 1000;
 
-//     const updatedPurchase = await processSuccessfulPayment(reference);
+const isDuplicateWebhookEvent = (eventKey) => {
+  if (!eventKey) {
+    return false;
+  }
 
-//     return res.status(200).json({
-//       message: 'Payment verified and receipt sent successfully',
-//       purchase: updatedPurchase
-//     });
-//   } catch (error) {
-//     console.error('verifyPayment error:', error.response?.data || error.message);
-//     return res.status(500).json({ error: 'Internal server error during verification' });
-//   }
-// };
+  const now = Date.now();
+  const cached = webhookEventCache.get(eventKey);
 
+  if (cached && cached > now) {
+    return true;
+  }
+
+  webhookEventCache.set(eventKey, now + EVENT_CACHE_TTL_MS);
+  return false;
+};
 
 // Shared helper for paid purchases
 const processSuccessfulPayment = async (reference) => {
-  const purchase = await prisma.purchase.findFirst({
-    where: { transactionRef: reference },
-    include: { manual: true }
+  let updatedPurchase = null;
+  let wasAlreadyPaid = false;
+
+  await prisma.$transaction(async (tx) => {
+    const lockedPurchase = await tx.$queryRaw`
+      SELECT p.*, m.*
+      FROM "Purchase" p
+      JOIN "Manual" m ON m.id = p."manualId"
+      WHERE p."transactionRef" = ${reference}
+      FOR UPDATE
+    `;
+
+    const purchase = Array.isArray(lockedPurchase) ? lockedPurchase[0] : null;
+
+    if (!purchase) {
+      throw new Error(`Purchase not found for reference: ${reference}`);
+    }
+
+    if (purchase.status === 'paid') {
+      wasAlreadyPaid = true;
+      updatedPurchase = {
+        ...purchase,
+        manual: {
+          id: purchase.manualId,
+          title: purchase.title,
+          courseCode: purchase.courseCode,
+          price: purchase.price,
+          imageURL: purchase.imageURL,
+          isActive: purchase.isActive,
+          createdAt: purchase.createdAt,
+        }
+      };
+      return;
+    }
+
+    const updatedManual = await tx.manual.update({
+      where: { id: purchase.manualId, stock: { gt: 0 } },
+      data: { stock: { decrement: 1 } },
+    });
+
+    if (!updatedManual) {
+      throw new Error(`Manual is sold out for reference: ${reference}`);
+    }
+
+    updatedPurchase = await tx.purchase.update({
+      where: { id: purchase.id },
+      data: {
+        status: 'paid',
+        qrToken: crypto.randomUUID(),
+      },
+      include: { manual: true }
+    });
   });
 
-  if (!purchase) {
-    throw new Error(`Purchase not found for reference: ${reference}`);
+  if (wasAlreadyPaid) {
+    return updatedPurchase;
   }
 
-  // Prevent double-processing if the webhook and verify call hit at the same time
-  if (purchase.status === 'paid') {
-    return purchase;
+  if (!updatedPurchase) {
+    return null;
   }
 
-  const qrToken = uuidv4();
-  const updatedPurchase = await prisma.purchase.update({
-    where: { id: purchase.id },
-    data: {
-      status: 'paid',
-      qrToken,
-    },
-    include: { manual: true }
-  });
-
-  // Generate QR and PDF
-  const qrUrl = `${process.env.BASE_URL}/api/purchases/verify/${qrToken}`;
-  const qrBuffer = await QRCode.toBuffer(qrUrl);
-  const pdfBuffer = await generateReceiptPDF(updatedPurchase, qrBuffer);
-
-  // --- NEW RESEND LOGIC ---
-  await sendManualEmail({
-    to: updatedPurchase.email,
-    subject: `LAUTECH Receipt: ${updatedPurchase.manual.title}`,
-    html: `
-      <div style="font-family: sans-serif; max-width: 500px; border: 1px solid #eee; padding: 20px;">
-        <h2 style="color: #003366;">Payment Successful</h2>
-        <p>Hello <b>${updatedPurchase.fullName}</b>,</p>
-        <p>Your payment for <b>${updatedPurchase.manual.title}</b> has been confirmed.</p>
-        <p>Please find your <b>Official Digital Receipt</b> attached as a PDF to this email.</p>
-        <p>Download it and present the QR code at the collection point to get your manual.</p>
-        <hr />
-        <p style="font-size: 11px; color: #888;">Transaction Ref: ${reference}</p>
-      </div>
-    `,
-    pdfBuffer: pdfBuffer,
-    filename: `LAUTECH_Receipt_${updatedPurchase.id}.pdf`
-  });
-
+  queueReceiptProcessing(updatedPurchase, reference);
   return updatedPurchase;
 };
 
@@ -372,7 +375,12 @@ const handlePaystackWebhook = async (req, res) => {
 
     if (payload.event === 'charge.success') {
       const reference = payload.data?.reference;
-      
+      const eventKey = payload.data?.id ? `paystack:${payload.data.id}` : `paystack:${reference}`;
+
+      if (isDuplicateWebhookEvent(eventKey)) {
+        return res.status(200).send('Duplicate webhook ignored');
+      }
+
       // --- THE KEY CHANGE ---
       // 1. Respond to Paystack IMMEDIATELY with 200 OK
       res.status(200).send('Webhook received');
@@ -423,6 +431,10 @@ const initializePurchase = async (req, res) => {
 
         if (!manual || !manual.isActive) {
             return res.status(404).json({ error: 'The requested manual is currently unavailable for purchase.' });
+        }
+
+        if (manual.stock <= 0) {
+            return res.status(400).json({ error: 'This manual is sold out and cannot be purchased right now.' });
         }
 
         // 3. CHECK IF ALREADY PAID

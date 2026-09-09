@@ -8,9 +8,7 @@ const { getAllStaff } = require('../controllers/adminController');
 const { deleteUser } = require('../controllers/adminController');
 
 const { authenticate, authorize } = require('../middleware/authMiddleware');
-// const { downloadManualPurchases } = require('../controllers/purchaseController');
 
-// Download CSV of purchases for a manual (admin only - protect/authorize can be added)
 router.get(
   '/download-purchases',
   authenticate, 
@@ -46,10 +44,9 @@ router.patch(
   enableStaff
 );
 
-// Add this to your admin routes
 router.delete('/staff/:userId',
    authenticate,
-   authorize('super_admin'), 
+   authorize(['super_admin']), 
    deleteUser);
    
 module.exports = router;

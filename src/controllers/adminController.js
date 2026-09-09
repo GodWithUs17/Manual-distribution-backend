@@ -2,20 +2,17 @@ const prisma = require('../utils/prisma');
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const ExcelJS = require('exceljs');
-const transporter = require('../utils/mailer');
+const { sendManualEmail } = require('../utils/mailer');
 
 
 const downloadManualPurchases = async (req, res) => {
     const { manualId, department, level } = req.query;
-
-    if (!manualId) {
-        return res.status(400).json({ message: "manualId query parameter is required" });
-    }
+    const normalizedManualId = manualId && String(manualId).toLowerCase() !== 'all' ? Number(manualId) : null;
 
     try {
         const purchases = await prisma.purchase.findMany({
             where: {
-                manualId: Number(manualId),
+                ...(normalizedManualId !== null && { manualId: normalizedManualId }),
                 status: 'paid',
                 ...(department && { department }),
                 ...(level && { level: Number(level) })
@@ -29,7 +26,7 @@ const downloadManualPurchases = async (req, res) => {
         });
 
         if (purchases.length === 0) {
-            return res.status(404).json({ message: 'No purchases found for the specified manual' });
+            return res.status(404).json({ message: normalizedManualId !== null ? 'No purchases found for the specified manual' : 'No paid purchases found for the selected filters' });
         }
 
         // --- 1. Initialize Workbook & Worksheet ---
@@ -58,7 +55,7 @@ const downloadManualPurchases = async (req, res) => {
                 department: purchase.department,
                 level: `${purchase.level}L`,
                 manualTitle: purchase.manual.title,
-                amount: `N${Number(purchase.manual.price).toLocaleString()}`,
+                amount: `N${Number(purchase.amount || (purchase.manual && purchase.manual.price) || 0).toLocaleString()}`,
                 ref: purchase.transactionRef,
                 date: dateStr
             });
@@ -79,9 +76,11 @@ const downloadManualPurchases = async (req, res) => {
             'Content-Type', 
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
+        const exportFileName = normalizedManualId !== null ? `manual-purchases-${normalizedManualId}.xlsx` : 'manual-purchases-all.xlsx';
+
         res.setHeader(
             'Content-Disposition', 
-            `attachment; filename="manual-purchases-${manualId}.xlsx"`
+            `attachment; filename="${exportFileName}"`
         );
 
         await workbook.xlsx.write(res);
@@ -201,13 +200,16 @@ const forgotPassword = async (req, res) => {
     },
   });
 
-  const resetLink = `http://localhost:5173/reset-password/${token}`;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const resetLink = `${frontendUrl.replace(/\/$/, '')}/reset-password/${token}`;
 
-  await transporter.sendMail({
+  await sendManualEmail({
     to: email,
     subject: "Password Reset",
     html: `<p>Click below to reset password:</p>
            <a href="${resetLink}">${resetLink}</a>`,
+    pdfBuffer: null,
+    filename: 'password-reset.html',
   });
 
   res.json({ message: "Reset link sent to email" });

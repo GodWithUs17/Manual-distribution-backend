@@ -7,13 +7,14 @@ const manualRoutes = require('./routes/manualRoutes');
 const purchaseRoutes = require('./routes/purchaseRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const app = express();
+const logger = require('./utils/logger');
+const errorHandler = require('./middleware/errorHandler');
 
 app.set('trust proxy', 1);
 
-// --- CORS CONFIGURATION ---
 const allowedOrigins = [
-  'http://localhost:5173', // Your local React/Vite dev server
-  'https://manual-distribution-frontend.vercel.app' // Your live Vercel URL
+  'http://localhost:5173',
+  'https://manual-distribution-frontend.vercel.app'
 ];
 
 app.use(cors({
@@ -30,15 +31,15 @@ app.use(cors({
   credentials: true // Required if you are sending tokens/cookies
 }));
 
-// Apply rate limiting to all requests
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 
 app.use(limiter);
-app.use(express.json());
+app.use('/api/purchases/paystack-webhook', express.raw({ type: 'application/json' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/manuals', manualRoutes);
@@ -47,22 +48,20 @@ app.use('/api/admin', adminRoutes);
 app.use("/uploads", express.static("uploads"));
 app.get('/', async (req, res) => {
   try {
-    console.log('Attempting to fetch manuals...');
+    logger.info('Attempting to fetch manuals');
     const manuals = await prisma.manual.findMany();
-    console.log(`Successfully fetched ${manuals.length} manuals`);
+    logger.info('Fetched manuals', { count: manuals.length });
     res.json({ message: 'Manual Distribution Backend API is running', manualsCount: manuals.length });
   } catch (error) {
-    console.error('ERROR fetching manuals:');
-    console.error('  Message:', error.message);
-    console.error('  Code:', error.code);
-    console.error('  Stack:', error.stack);
+    logger.error('ERROR fetching manuals', { message: error.message, code: error.code, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch manuals', details: error.message });
   }
 });
 
-// A simple health check route
 app.get('/health', (req, res) => {
   res.status(200).send('Server is healthy and awake!');
 });
+
+app.use(errorHandler);
 
 module.exports = app;

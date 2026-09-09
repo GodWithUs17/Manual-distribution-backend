@@ -2,13 +2,18 @@ const prisma = require('../utils/prisma');
 
 async function createManual(req, res) {
   try {
-    const { title, courseCode, price } = req.body;
+    const { title, courseCode, price, stock } = req.body;
 
-    if (!title || price == null) {
-      return res.status(400).json({ error: 'title and price are required' });
+    if (!title || price == null || stock == null) {
+      return res.status(400).json({ error: 'title, price, and stock are required' });
     }
 
     const imageURL = req.file ? req.file.path : null;
+    const normalizedStock = Number(stock);
+
+    if (!Number.isInteger(normalizedStock) || normalizedStock < 0) {
+      return res.status(400).json({ error: 'stock must be a non-negative whole number' });
+    }
 
     const manual = await prisma.manual.create({
       data: {
@@ -16,6 +21,7 @@ async function createManual(req, res) {
         courseCode: courseCode || null,
         imageURL,
         price: Number(price),
+        stock: normalizedStock,
       },
     });
 
@@ -77,26 +83,27 @@ async function toggleManualStatus(req, res) {
 async function updateManual(req, res) {
   try {
     const id = Number(req.params.id);
-    const { title, courseCode, price, isActive } = req.body;
+    const { title, courseCode, price, stock, isActive } = req.body;
 
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid manual id' });
 
-    // 1. Check if the manual exists
     const currentManual = await prisma.manual.findUnique({ where: { id } });
     if (!currentManual) return res.status(404).json({ error: 'Manual not found' });
 
-    // 2. Prepare update object
+    const normalizedStock = stock !== undefined ? Number(stock) : currentManual.stock;
+    if (!Number.isInteger(normalizedStock) || normalizedStock < 0) {
+      return res.status(400).json({ error: 'stock must be a non-negative whole number' });
+    }
+
     const updateData = {
       title: title || currentManual.title,
       courseCode: courseCode !== undefined ? courseCode : currentManual.courseCode,
       price: price !== undefined ? Number(price) : currentManual.price,
+      stock: normalizedStock,
       isActive: isActive !== undefined ? (isActive === 'true' || isActive === true) : currentManual.isActive,
     };
 
-    // 3. Handle New Image Upload (The Cloudinary Way)
     if (req.file) {
-      // Just take the new Cloudinary URL. 
-      // You don't need 'fs' or 'path' anymore!
       updateData.imageURL = req.file.path; 
     }
 
@@ -146,10 +153,45 @@ async function deleteManual(req, res) {
   }
 }
 
+async function restockManual(req, res) {
+  try {
+    const manualId = Number(req.params.id);
+    const amount = Number(req.body.amount ?? req.body.quantity ?? 1);
+
+    if (Number.isNaN(manualId)) {
+      return res.status(400).json({ error: 'Invalid manual id' });
+    }
+
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'Restock amount must be a positive whole number' });
+    }
+
+    const manual = await prisma.manual.findUnique({ where: { id: manualId } });
+    if (!manual) return res.status(404).json({ error: 'Manual not found' });
+
+    const updated = await prisma.manual.update({
+      where: { id: manualId },
+      data: {
+        stock: manual.stock + amount,
+        isActive: true,
+      },
+    });
+
+    return res.json({
+      message: 'Manual restocked successfully',
+      manual: updated,
+    });
+  } catch (error) {
+    console.error('restockManual error:', error);
+    return res.status(500).json({ error: 'Failed to restock manual' });
+  }
+}
+
 
 module.exports = { 
   createManual,
    getManuals, 
    toggleManualStatus, 
    updateManual, 
-   deleteManual };
+   deleteManual,
+   restockManual };

@@ -14,7 +14,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^6.19.2",
-    "axios": "^1.13.6",
+    "axios": "^1.18.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^1.41.3",
@@ -30,8 +30,7 @@
     "pdfkit": "^0.18.0",
     "pg": "^8.17.2",
     "qrcode": "^1.5.4",
-    "resend": "^6.11.0",
-    "uuid": "^13.0.0"
+    "resend": "^6.11.0"
   },
   "devDependencies": {
     "@types/node": "^25.0.10",

@@ -42,6 +42,7 @@ model Manual {
   title     String
   courseCode String?
   price     Float
+  stock     Int       @default(0)
   imageURL  String?
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())

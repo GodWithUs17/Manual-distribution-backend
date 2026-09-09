@@ -19,11 +19,14 @@ const authenticate = (req, res, next) => {
 };
 
 const authorize = (roles = []) => {
+  // roles can be a single string or array
+  const allowed = Array.isArray(roles) ? roles : [roles];
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res
-        .status(403)
-        .json({ message: 'Forbidden: insufficient permission' });
+    if (!req.user || !req.user.role) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+    if (!allowed.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Forbidden: insufficient permission' });
     }
     next();
   };

@@ -5,6 +5,7 @@ dist/
 # Environment variables (CRITICAL)
 .env
 .env.local
+.env.example
 .env.production
 
 # Prisma

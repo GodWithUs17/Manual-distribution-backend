@@ -1,6 +1,7 @@
-require ('dotenv').config();
+require('dotenv').config();
 const axios = require('axios');
 const app = require('./src/app');
+const logger = require('./src/utils/logger');
 const dns = require('node:dns');
 dns.setDefaultResultOrder('ipv4first');
 
@@ -8,7 +9,7 @@ const PORT = process.env.PORT || 5000;
 
 
 const server = app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  logger.info('Server is running', { port: PORT });
 
   // 2. Add the Ping logic here
   // Note: Check your Render dashboard after deploying to see if your URL is exactly this!
@@ -16,39 +17,41 @@ const server = app.listen(PORT, () => {
 
   setInterval(() => {
     axios.get(RENDER_URL)
-      .then(() => console.log("Self-ping successful: Staying awake!"))
-      .catch((err) => console.error("Self-ping failed:", err.message));
+      .then(() => logger.info('Self-ping successful: Staying awake'))
+      .catch((err) => logger.error('Self-ping failed', { message: err.message }));
   }, 840000); // 14 minutes
 });
 
 // Handle uncaught errors
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  logger.error('Uncaught Exception', { message: error.message, stack: error.stack });
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.error('Unhandled Rejection', { promise, reason });
   process.exit(1);
 });
 
-console.log("EMAIL USER:", process.env.EMAIL_USER);
+// Avoid logging raw environment secrets; only indicate presence.
+console.log('EMAIL_USER set:', !!process.env.EMAIL_USER);
 
 app.get('/test-email', async (req, res) => {
-  const transporter = require('./src/utils/mailer');
+  const { sendManualEmail } = require('./src/utils/mailer');
 
   try {
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_USER, 
+    const result = await sendManualEmail({
+      to: process.env.EMAIL_USER,
       subject: 'Manual App Test Email',
-      html: '<h2>If you receive this email, Nodemailer works.</h2>'
+      html: '<h2>If you receive this email, Resend works.</h2>',
+      pdfBuffer: null,
+      filename: 'manual-app-test-email.html'
     });
 
-    console.log('EMAIL SENT:', info.response);
+    logger.info('EMAIL SENT', { result });
     res.send('Email sent successfully');
   } catch (error) {
-    console.error('EMAIL ERROR:', error);
+    logger.error('EMAIL ERROR', { message: error.message, stack: error.stack });
     res.status(500).send('Email failed');
   }
 });
