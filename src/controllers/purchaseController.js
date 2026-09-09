@@ -364,6 +364,9 @@ const verifyPayment = async (req, res) => {
       }
     );
 
+    // Debug log to inspect what Flutterwave actually returns on your server
+    console.log("Flutterwave Verify Response:", JSON.stringify(flutterwaveRes.data));
+
     const verifiedTxRef =
       flutterwaveRes.data?.data?.tx_ref ||
       flutterwaveRes.data?.data?.txRef ||
@@ -373,7 +376,7 @@ const verifyPayment = async (req, res) => {
 
     const isSuccessful =
       flutterwaveRes.data?.status === 'success' &&
-      ['successful', 'success'].includes(flutterwaveRes.data?.data?.status);
+      ['successful', 'success', 'completed'].includes(flutterwaveRes.data?.data?.status);
 
     if (!isSuccessful) {
       return res.status(400).json({
